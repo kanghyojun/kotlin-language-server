@@ -10,5 +10,5 @@ rootProject.name = "kotlin-language-server"
 include(
     "platform",
     "shared",
-    "server"
+    "server",
 )
