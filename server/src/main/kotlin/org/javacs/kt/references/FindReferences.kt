@@ -15,6 +15,7 @@ import org.jetbrains.kotlin.descriptors.ClassConstructorDescriptor
 import org.jetbrains.kotlin.descriptors.ConstructorDescriptor
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.descriptors.FunctionDescriptor
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationDescriptor
 import org.jetbrains.kotlin.js.resolve.diagnostics.findPsi
 import org.jetbrains.kotlin.lexer.KtSingleValueToken
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -55,11 +56,16 @@ private fun doFindReferences(element: KtNamedDeclaration, sp: SourcePath): Colle
     LOG.debug("Scanning {} files for references to {}", maybes.size, element.fqName)
     val recompile = sp.compileFiles(maybes.map(Path::toUri))
 
-    return when {
+    val references = when {
         isComponent(declaration) -> findComponentReferences(element, recompile) + findNameReferences(element, recompile)
         isIterator(declaration) -> findIteratorReferences(element, recompile) + findNameReferences(element, recompile)
         isPropertyDelegate(declaration) -> findDelegateReferences(element, recompile) + findNameReferences(element, recompile)
         else -> findNameReferences(element, recompile)
+    } + findAnnotationReferences(element, recompile)
+
+    return references.distinctBy {
+        val path = it.containingFile.toPath().toAbsolutePath().toString()
+        "$path:${it.textRange.startOffset}:${it.textRange.endOffset}"
     }
 }
 
@@ -77,18 +83,35 @@ fun findReferencesToDeclarationInFile(declaration: KtNamedDeclaration, file: Com
         isIterator(descriptor) -> findIteratorReferences(declaration, bindingContext) + findNameReferences(declaration, bindingContext)
         isPropertyDelegate(descriptor) -> findDelegateReferences(declaration, bindingContext) + findNameReferences(declaration, bindingContext)
         else -> findNameReferences(declaration, bindingContext)
-    }
+    } + findAnnotationReferences(declaration, bindingContext)
 
     return references.map {
         location(it)?.range
     }.filterNotNull()
-     .sortedWith(compareBy({ it.start.line }))
+     .distinctBy { "${it.start.line}:${it.start.character}:${it.end.line}:${it.end.character}" }
+     .sortedWith(compareBy({ it.start.line }, { it.start.character }))
 }
 
 private fun findNameReferences(element: KtNamedDeclaration, recompile: BindingContext): List<KtReferenceExpression> {
     val references = recompile.getSliceContents(BindingContext.REFERENCE_TARGET)
 
     return references.filter { matchesReference(it.value, element) }.map { it.key }
+}
+
+private fun findAnnotationReferences(element: KtNamedDeclaration, recompile: BindingContext): List<KtSimpleNameExpression> {
+    if (element !is KtClass || !element.hasModifier(KtTokens.ANNOTATION_KEYWORD)) return emptyList()
+
+    val annotations = recompile.getSliceContents(BindingContext.ANNOTATION)
+    return annotations
+        .asSequence()
+        .filter { matchesAnnotationReference(it.value, element) }
+        .mapNotNull { (it.key.typeReference?.typeElement as? KtUserType)?.referenceExpression }
+        .toList()
+}
+
+private fun matchesAnnotationReference(found: AnnotationDescriptor, search: KtClass): Boolean {
+    val annotationClass = found.type.constructor.declarationDescriptor ?: return false
+    return annotationClass.fqNameSafe == search.fqName
 }
 
 private fun findDelegateReferences(element: KtNamedDeclaration, recompile: BindingContext): List<KtElement> {

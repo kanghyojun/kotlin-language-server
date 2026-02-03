@@ -12,7 +12,10 @@ fun defaultClassPathResolver(workspaceRoots: Collection<Path>, db: Database? = n
             .or(workspaceRoots.asSequence().flatMap { workspaceResolvers(it) }.joined)
     ).or(BackupClassPathResolver)
 
-    return db?.let { CachedClassPathResolver(childResolver, it) } ?: childResolver
+    // Temporarily disable SQLite-backed classpath cache because it can become corrupt
+    // ("...id is not in record set") and break dependency resolution in active sessions.
+    // We prefer slower but reliable uncached resolution.
+    return childResolver
 }
 
 /** Searches the workspace for all files that could provide classpath info. */

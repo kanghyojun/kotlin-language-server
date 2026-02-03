@@ -116,9 +116,21 @@ class CompiledFile(
         val oldCursor = oldOffset(cursor)
         val oldChanged = changedRegion(parse.text, content)?.first ?: TextRange(cursor, cursor)
         val psi = parse.findElementAt(oldCursor) ?: return nullResult("Couldn't find anything at ${describePosition(cursor)}")
-        val oldParent = psi.parentsWithSelf
+        val declarationParent = psi.parentsWithSelf
                 .filterIsInstance<KtDeclaration>()
                 .firstOrNull { it.textRange.contains(oldChanged) } ?: parse
+        val oldParent = if (asReference && declarationParent is KtClassOrObject) {
+            // Annotation names are type references (not expressions), so they need a separate recovery path.
+            psi.parentsWithSelf
+                .filterIsInstance<KtTypeReference>()
+                .firstOrNull { it.textRange.contains(oldChanged) }
+                ?: psi.parentsWithSelf
+                    .filterIsInstance<KtExpression>()
+                    .firstOrNull { it.textRange.contains(oldChanged) }
+                ?: declarationParent
+        } else {
+            declarationParent
+        }
 
         LOG.debug { "PSI path: ${psi.parentsWithSelf.toList()}" }
 
@@ -147,6 +159,13 @@ class CompiledFile(
                     val prefix = "val x: "
                     surroundingContent = prefix + psi.text
                     offset = psi.textRange.startOffset - prefix.length
+
+                    return Pair(surroundingContent, offset)
+                }
+                parent is KtTypeReference -> {
+                    val prefix = "val x: "
+                    surroundingContent = prefix + parent.text
+                    offset = parent.textRange.startOffset - prefix.length
 
                     return Pair(surroundingContent, offset)
                 }

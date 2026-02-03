@@ -79,7 +79,10 @@ private fun readDependenciesViaGradleCLI(projectDirectory: Path, gradleScripts: 
     val tmpScripts = gradleScripts.map { gradleScriptToTempFile(it, deleteOnExit = false).toPath().toAbsolutePath() }
     val gradle = getGradleCommand(projectDirectory)
 
-    val command = listOf(gradle.toString()) + tmpScripts.flatMap { listOf("-I", it.toString()) } + gradleTasks + listOf("--console=plain")
+    val command = listOf(gradle.toString()) +
+        tmpScripts.flatMap { listOf("-I", it.toString()) } +
+        gradleTasks +
+        listOf("--no-configuration-cache", "--console=plain")
     val dependencies = findGradleCLIDependencies(command, projectDirectory)
         ?.also { LOG.debug("Classpath for task {}", it) }
         .orEmpty()
